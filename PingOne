@@ -1,0 +1,20 @@
+
+Authorization URL https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/authorize
+
+Pushed Authorization Request URL https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/par
+
+Token Endpoint https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/token
+
+JWKS Endpoint https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/jwks
+
+UserInfo Endpoint https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/userinfo
+
+Signoff Endpoint https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/signoff
+
+OIDC Discovery Endpoint https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/.well-known/openid-configuration
+
+Token Introspection Endpoint https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/introspect
+
+Token Revocation Endpoint https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as/revoke
+
+Issuer https://auth.pingone.com/e2daa153-1ba8-4a63-934a-4dc428f11e38/as
