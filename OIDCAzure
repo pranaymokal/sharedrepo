@@ -1,0 +1,283 @@
+// token validator 
+
+import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.JWK;
+import com.nimbusds.jose.jwk.source.JWKSource;
+import com.nimbusds.jose.jwk.source.RemoteJWKSet;
+import com.nimbusds.jose.proc.JWSAlgorithmFamilyJWSKeySelector;
+import com.nimbusds.jose.proc.JWSKeySelector;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
+import com.nimbusds.jwt.proc.ConfigurableJWTProcessor;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
+
+import java.net.URL;
+
+public class IDTokenValidator {
+    public static void main(String[] args) throws Exception {
+        String idToken = "eyJhbGciOiJIUzI1NiIsInR..."; // Your ID token
+
+        // Fetch JWK Set from Azure AD
+        String jwksUrl = "https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys";
+        JWKSource<SecurityContext> keySource = new RemoteJWKSet<>(new URL(jwksUrl));
+
+        // Create JWT processor
+        ConfigurableJWTProcessor<SecurityContext> jwtProcessor = new DefaultJWTProcessor<>();
+        JWSKeySelector<SecurityContext> keySelector =
+                new JWSAlgorithmFamilyJWSKeySelector<>(jwtProcessor.getJWSAlgorithmVerifierFactory(), keySource);
+        jwtProcessor.setJWSKeySelector(keySelector);
+
+        // Process token
+        JWTClaimsSet claimsSet = jwtProcessor.process(idToken, null);
+
+        // Validate claims
+        String expectedAudience = "your-client-id";
+        if (!claimsSet.getAudience().contains(expectedAudience)) {
+            throw new Exception("Invalid audience!");
+        }
+
+        System.out.println("ID Token is valid! User: " + claimsSet.getSubject());
+    }
+}
+
+5. Extract User Information from ID Token
+Once the token is validated, you can extract user info:
+
+java
+Copy
+Edit
+System.out.println("User Email: " + claimsSet.getStringClaim("email"));
+System.out.println("User Name: " + claimsSet.getStringClaim("name"));
+Since the ID token already contains user details, you don’t need to call /oidc/userinfo.
+
+
+// Extract claims
+
+List<String> roles = claimsSet.getStringListClaim("roles");
+
+if (!roles.contains("Admin")) {
+    throw new Exception("User does not have the required role!");
+}
+
+
+String userId = claimsSet.getStringClaim("oid");
+String email = claimsSet.getStringClaim("email");
+List<String> roles = claimsSet.getStringListClaim("roles");
+
+// Check if the user exists
+Optional<User> user = userRepository.findById(userId);
+if (!user.isPresent()) {
+    throw new Exception("User not registered!");
+}
+
+// Check if user is active
+if (!user.get().isActive()) {
+    throw new Exception("User account is inactive!");
+}
+
+// Check roles (if needed)
+if (!roles.contains("Admin")) {
+    throw new Exception("User does not have required access!");
+}
+
+System.out.println("User is valid and authorized!");
+
+
+
+//controller
+
+@RestController
+@RequestMapping("/custom-userinfo")
+public class CustomUserInfoController {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @GetMapping
+    public ResponseEntity<?> getUserInfo(@RequestHeader("Authorization") String token) {
+        try {
+            // Extract token without "Bearer "
+            String jwt = token.substring(7);
+
+            // Validate token (similar to previous steps)
+            JWTClaimsSet claimsSet = validateJwt(jwt);
+            String userId = claimsSet.getStringClaim("oid");
+
+            // Find user in the database
+            Optional<User> user = userRepository.findById(userId);
+            if (!user.isPresent()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body("User not found");
+            }
+
+            // Construct response
+            Map<String, Object> userInfo = new HashMap<>();
+            userInfo.put("sub", userId);
+            userInfo.put("email", claimsSet.getStringClaim("email"));
+            userInfo.put("name", claimsSet.getStringClaim("name"));
+            userInfo.put("roles", claimsSet.getStringListClaim("roles"));
+
+            return ResponseEntity.ok(userInfo);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid token");
+        }
+    }
+}
+
+@Bean
+public OAuth2UserService<OidcUserRequest, OidcUser> oidcUserService() {
+    return userRequest -> {
+        String userInfoEndpoint = "https://your-api/custom-userinfo";
+        
+        // Call custom user info endpoint
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+            userInfoEndpoint, HttpMethod.GET,
+            new HttpEntity<>(createHeaders(userRequest.getAccessToken().getTokenValue())),
+            new ParameterizedTypeReference<>() {}
+        );
+
+        Map<String, Object> userAttributes = response.getBody();
+        return new DefaultOidcUser(userRequest.getIdToken().getClaims(), new OidcIdToken(userAttributes));
+    };
+}
+
+
+
+1. Endpoint Definition
+HTTP Method: GET
+URL: /custom-userinfo
+Input: Authorization header with Bearer token
+Output: JSON response with user claims
+2. Request Format
+Clients should call this endpoint with an access token in the Authorization header.
+
+Example Request
+http
+Copy
+Edit
+GET /custom-userinfo HTTP/1.1
+Host: your-api.com
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR...
+3. Response Format
+Success Response (200 OK)
+If the token is valid and the user exists, return the user claims in JSON format:
+
+json
+Copy
+Edit
+{
+  "sub": "b8c5d0c8-4a5a-4e23-89c5-1b5b6c8f3c5d",
+  "name": "John Doe",
+  "email": "john.doe@example.com",
+  "preferred_username": "johndoe",
+  "given_name": "John",
+  "family_name": "Doe",
+  "roles": ["Admin", "User"],
+  "groups": [
+    "12345678-90ab-cdef-1234-567890abcdef",
+    "abcdef12-3456-7890-abcd-ef1234567890"
+  ]
+}
+Error Responses
+401 Unauthorized (Invalid token)
+json
+Copy
+Edit
+{
+  "error": "invalid_token",
+  "error_description": "The token provided is invalid or expired."
+}
+403 Forbidden (User not found or inactive)
+json
+Copy
+Edit
+{
+  "error": "access_denied",
+  "error_description": "User does not exist or is not active."
+}
+4. Implementation Example (Spring Boot)
+Here’s how you can implement it in Spring Boot using Nimbus JOSE JWT:
+
+java
+Copy
+Edit
+@RestController
+@RequestMapping("/custom-userinfo")
+public class CustomUserInfoController {
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Value("${azure.ad.jwks-url}")
+    private String jwksUrl;
+
+    @GetMapping
+    public ResponseEntity<?> getUserInfo(@RequestHeader("Authorization") String token) {
+        try {
+            // Extract JWT without "Bearer "
+            String jwt = token.replace("Bearer ", "");
+
+            // Validate token
+            JWTClaimsSet claimsSet = validateJwt(jwt);
+            String userId = claimsSet.getStringClaim("oid"); // Object ID from Azure AD
+
+            // Check if the user exists
+            Optional<User> user = userRepository.findById(userId);
+            if (!user.isPresent() || !user.get().isActive()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                    "error", "access_denied",
+                    "error_description", "User does not exist or is not active."
+                ));
+            }
+
+            // Construct response
+            Map<String, Object> userInfo = new HashMap<>();
+            userInfo.put("sub", userId);
+            userInfo.put("email", claimsSet.getStringClaim("email"));
+            userInfo.put("name", claimsSet.getStringClaim("name"));
+            userInfo.put("preferred_username", claimsSet.getStringClaim("preferred_username"));
+            userInfo.put("given_name", claimsSet.getStringClaim("given_name"));
+            userInfo.put("family_name", claimsSet.getStringClaim("family_name"));
+            userInfo.put("roles", claimsSet.getStringListClaim("roles"));
+            userInfo.put("groups", claimsSet.getStringListClaim("groups"));
+
+            return ResponseEntity.ok(userInfo);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                "error", "invalid_token",
+                "error_description", "The token provided is invalid or expired."
+            ));
+        }
+    }
+
+    private JWTClaimsSet validateJwt(String jwtToken) throws Exception {
+        JWKSource<SecurityContext> keySource = new RemoteJWKSet<>(new URL(jwksUrl));
+        ConfigurableJWTProcessor<SecurityContext> jwtProcessor = new DefaultJWTProcessor<>();
+        JWSKeySelector<SecurityContext> keySelector = new JWSAlgorithmFamilyJWSKeySelector<>(
+            jwtProcessor.getJWSAlgorithmVerifierFactory(), keySource);
+        jwtProcessor.setJWSKeySelector(keySelector);
+        return jwtProcessor.process(jwtToken, null);
+    }
+}
+5. Summary
+✅ Input: Bearer token in the Authorization header
+✅ Output: JSON with user details (sub, email, roles, etc.)
+✅ Error Handling: Returns 401 for invalid tokens, 403 if the user isn’t found or inactive
+✅ Implementation:
+
+Extracts and validates the token
+Checks if the user exists and is active
+Returns user details in OpenID Connect format
+Would you like to customize this further for your application setup?
+
+
+
+
+
+
+
+
+
+
+
+
